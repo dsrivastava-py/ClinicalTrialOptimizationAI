@@ -1,0 +1,144 @@
+name: clinical_trial_env
+version: "0.1.0"
+spec_version: 1
+description: >
+  A reinforcement learning environment simulating clinical drug trial
+  optimization. An AI agent acts as a trial manager, making sequential
+  decisions about dosage, patient enrollment, and trial termination to
+  find the optimal drug dose safely, efficiently, and within budget.
+author: "Devansh Srivastava"
+license: "MIT"
+tags:
+  - openenv
+  - healthcare
+  - rl
+  - drug-discovery
+
+port: 7860
+
+tasks:
+  - name: dose_finding_easy
+    description: >
+      Find the optimal dose for a drug with a wide safety window.
+      Target dose is in the 30–70mg range. Side effect threshold is
+      generous. Agent must find an effective dose (>35% effectiveness)
+      without exceeding 30% side effect rate.
+    difficulty: easy
+    max_steps: 20
+    success_threshold: 0.5
+
+  - name: dose_finding_medium
+    description: >
+      Find the optimal dose with a higher target range (50–80mg) and
+      narrower safety window. Requires more precise titration. Agent
+      must balance effectiveness vs safety more carefully.
+    difficulty: medium
+    max_steps: 20
+    success_threshold: 0.5
+
+  - name: dose_finding_hard
+    description: >
+      Find the optimal dose with a very high target range (60–100mg)
+      and a very narrow safety margin (only 8-12mg above optimal before
+      side effects spike). Requires precise, conservative exploration.
+    difficulty: hard
+    max_steps: 20
+    success_threshold: 0.5
+
+action_space:
+  type: discrete
+  description: "Five possible actions the agent can take each week"
+  actions:
+    - name: increase_dose
+      description: "Increase current dose by 20mg (costs $150,000)"
+    - name: decrease_dose
+      description: "Decrease current dose by 15mg (costs $100,000)"
+    - name: keep_dose
+      description: "Maintain current dose, collect more data (costs $80,000)"
+    - name: enroll_more_patients
+      description: "Enroll 40 additional patients at current dose (costs $200,000)"
+    - name: stop_trial
+      description: "Conclude the trial and submit results"
+
+observation_space:
+  week:
+    type: int
+    range: [1, 52]
+    description: "Current trial week (1-52)"
+  current_dose_mg:
+    type: int
+    range: [5, 150]
+    description: "Current dose being tested in milligrams"
+  patients_enrolled:
+    type: int
+    description: "Total number of patients enrolled so far"
+  avg_effectiveness:
+    type: float
+    range: [0.0, 1.0]
+    description: "Average blood sugar reduction rate observed"
+  side_effect_rate:
+    type: float
+    range: [0.0, 1.0]
+    description: "Fraction of patients experiencing side effects"
+  budget_remaining:
+    type: float
+    description: "Remaining trial budget in USD"
+  done:
+    type: bool
+    description: "Whether the episode has ended"
+  reward:
+    type: float
+    range: [-1.0, 1.0]
+    description: "Reward signal for the last action taken"
+  message:
+    type: str
+    description: "Human-readable description of what happened"
+  metadata:
+    type: dict
+    description: "Additional metadata (OpenEnv base field)"
+
+reward_function:
+  description: >
+    Shaped reward signal normalised to [-1.0, +1.0] per step.
+    Rewards progress toward finding an effective, safe dose.
+    Penalises dangerous actions and waste.
+  signals:
+    - name: effective_dose_increase
+      range: [0.10, 0.25]
+      condition: "Dose increase that raises effectiveness above threshold"
+    - name: safety_violation
+      range: [-0.30, -0.40]
+      condition: "Side effects exceeded 30% threshold"
+    - name: successful_stop
+      value: 0.50
+      condition: "Trial stopped with effectiveness >35% and side effects <20%"
+    - name: budget_exhaustion
+      value: -0.20
+      condition: "Budget runs out before trial conclusion"
+    - name: emergency_stop
+      value: -0.40
+      condition: "Side effect rate exceeds 50% threshold"
+
+grader:
+  description: >
+    Episode-level score from 0.0 to 1.0 computed at end of episode.
+    Partial progress signals provided throughout trajectory via step rewards.
+  criteria:
+    - name: safety_maintained
+      weight: 0.25
+      condition: "side_effect_rate <= 0.30 throughout"
+    - name: strong_effectiveness
+      weight: 0.30
+      condition: "effectiveness >= 0.40"
+    - name: moderate_effectiveness
+      weight: 0.15
+      condition: "effectiveness >= 0.25"
+    - name: efficiency_bonus
+      weight: 0.20
+      condition: "found effective dose within 20 weeks"
+    - name: budget_managed
+      weight: 0.10
+      condition: "budget not fully exhausted"
+    - name: budget_efficiency_bonus
+      weight: 0.15
+      condition: "used <50% of budget while achieving effectiveness"

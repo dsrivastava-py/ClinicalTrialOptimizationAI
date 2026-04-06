@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Misc temp files
+*.txt.bak
+output.txt
+env_src.txt
+models_src.txt
+
+# Secrets — NEVER commit keys
+.env
+*.env
+keys.txt
+
+# IDE
+.vscode/
+.idea/
+*.swp
