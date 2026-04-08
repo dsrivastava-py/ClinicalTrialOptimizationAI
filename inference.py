@@ -33,6 +33,7 @@ API_KEY = (
 )
 API_BASE_URL = os.getenv("API_BASE_URL", "https://router.huggingface.co/v1")
 MODEL_NAME   = os.getenv("MODEL_NAME", "Qwen/Qwen2.5-7B-Instruct")
+HF_TOKEN     = os.getenv("HF_TOKEN")
 
 BENCHMARK              = "clinical_trial_env"
 MAX_STEPS              = 20
@@ -156,7 +157,7 @@ def run_episode(task_name: str, difficulty: str) -> float:
     # dose = same scores every run. Required by hackathon spec.
     random.seed(REPRODUCIBILITY_SEED)
 
-    client = OpenAI(base_url=API_BASE_URL, api_key=API_KEY)
+    client = OpenAI(base_url=API_BASE_URL, api_key=HF_TOKEN)
 
     # Difficulty is baked into the constructor — reset() reads self.difficulty
     env = ClinicalTrialEnvironment(difficulty=difficulty)
