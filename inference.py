@@ -3,8 +3,8 @@ Clinical Trial Optimization — Baseline Inference Script
 Uses the OpenAI client to run an LLM agent against all 3 tasks.
 
 MANDATORY ENVIRONMENT VARIABLES:
-  HF_TOKEN       — Hugging Face API key (also accepted as OPENAI_API_KEY)
-  API_BASE_URL   — LLM inference endpoint (default: HF router)
+  HF_TOKEN       — API key (Groq: gsk_..., HuggingFace: hf_...)
+  API_BASE_URL   — LLM inference endpoint
   MODEL_NAME     — Model identifier to use
 
 MANDATORY LOG FORMAT:
@@ -13,6 +13,7 @@ MANDATORY LOG FORMAT:
   [END]   success=<bool> steps=<n> score=<score> rewards=<r1,r2,...>
 """
 import os
+import random
 import sys
 from typing import List, Optional
 
@@ -25,18 +26,18 @@ from server.grader import grade_by_task
 from models import TrialAction
 
 # ── MANDATORY ENV VARIABLES ──────────────────────────────────────────────────
-# Keys are read from environment; do NOT hardcode values here.
 API_KEY = (
     os.getenv("HF_TOKEN")
     or os.getenv("OPENAI_API_KEY")
     or os.getenv("API_KEY")
 )
 API_BASE_URL = os.getenv("API_BASE_URL", "https://router.huggingface.co/v1")
-MODEL_NAME = os.getenv("MODEL_NAME", "Qwen/Qwen2.5-7B-Instruct")
+MODEL_NAME   = os.getenv("MODEL_NAME", "Qwen/Qwen2.5-7B-Instruct")
 
-BENCHMARK = "clinical_trial_env"
-MAX_STEPS = 20          # Matches max_steps in openenv.yaml tasks
+BENCHMARK              = "clinical_trial_env"
+MAX_STEPS              = 20
 SUCCESS_SCORE_THRESHOLD = 0.5
+REPRODUCIBILITY_SEED   = 42   # Fixed seed — ensures same scores every run
 
 VALID_ACTIONS = [
     "increase_dose",
@@ -46,7 +47,6 @@ VALID_ACTIONS = [
     "stop_trial",
 ]
 
-# Task name → difficulty mapping (must match openenv.yaml)
 TASKS = [
     {"name": "dose_finding_easy",   "difficulty": "easy"},
     {"name": "dose_finding_medium", "difficulty": "medium"},
@@ -63,7 +63,7 @@ def log_start(task: str, env: str, model: str) -> None:
 def log_step(step: int, action: str, reward: float,
              done: bool, error: Optional[str]) -> None:
     error_val = error if error else "null"
-    done_val = str(done).lower()
+    done_val  = str(done).lower()
     print(
         f"[STEP] step={step} action={action} "
         f"reward={reward:.2f} done={done_val} error={error_val}",
@@ -71,7 +71,8 @@ def log_step(step: int, action: str, reward: float,
     )
 
 
-def log_end(success: bool, steps: int, score: float, rewards: List[float]) -> None:
+def log_end(success: bool, steps: int, score: float,
+            rewards: List[float]) -> None:
     rewards_str = ",".join(f"{r:.2f}" for r in rewards)
     print(
         f"[END] success={str(success).lower()} "
@@ -99,7 +100,7 @@ Current Trial Status:
 Recent decisions:
 {history_block}
 
-PRIORITY RULES (apply the FIRST rule that matches — stop there):
+PRIORITY RULES (apply the FIRST matching rule — stop there):
 1. SAFETY: If side_effect_rate > 25% → decrease_dose
 2. SUCCESS: If effectiveness > 35% AND side_effect_rate < 20% → stop_trial
 3. EXPLORE UP: If effectiveness < 30% AND side_effect_rate < 20% → increase_dose
@@ -109,8 +110,7 @@ PRIORITY RULES (apply the FIRST rule that matches — stop there):
 7. DEFAULT: increase_dose
 
 IMPORTANT: The trial starts at 10mg. The optimal dose is MUCH HIGHER (30-100mg).
-If effectiveness is low and side effects are safe, you MUST increase the dose.
-Do NOT choose keep_dose when effectiveness is below 30%.
+If effectiveness is below 30% and side effects are safe, you MUST choose increase_dose.
 
 Choose EXACTLY ONE action:
 increase_dose, decrease_dose, keep_dose, enroll_more_patients, stop_trial
@@ -127,29 +127,48 @@ Reply with ONLY the action name. Nothing else."""
         raw = response.choices[0].message.content.strip().lower()
         for action in VALID_ACTIONS:
             if action in raw:
-                return action
-        return "increase_dose"  # smart fallback — always try to progress
+                decision = action
+                break
+        else:
+            decision = "increase_dose"
+
     except Exception as e:
         print(f"[DEBUG] LLM call failed: {e}", flush=True)
-        return "increase_dose"
+        decision = "increase_dose"
+
+    # ── SAFETY OVERRIDE ──────────────────────────────────────────────────────
+    # Prevent LLM from getting stuck on keep_dose when the dose is clearly
+    # too low to be effective. This is the single most common LLM failure mode.
+    if decision == "keep_dose" and observation.avg_effectiveness < 0.25:
+        decision = "increase_dose"
+
+    # Prevent stop_trial when effectiveness is too low — wasteful termination
+    if decision == "stop_trial" and observation.avg_effectiveness < 0.20:
+        decision = "increase_dose"
+
+    return decision
 
 
 # ── SINGLE EPISODE ────────────────────────────────────────────────────────────
 
 def run_episode(task_name: str, difficulty: str) -> float:
+    # Fix random seed for REPRODUCIBILITY — same seed = same hidden optimal
+    # dose = same scores every run. Required by hackathon spec.
+    random.seed(REPRODUCIBILITY_SEED)
+
     client = OpenAI(base_url=API_BASE_URL, api_key=API_KEY)
 
-    # Create env with the correct difficulty baked in
+    # Difficulty is baked into the constructor — reset() reads self.difficulty
     env = ClinicalTrialEnvironment(difficulty=difficulty)
 
-    # reset() applies difficulty parameters — difficulty is NOT overwritten
-    obs = env.reset(task_name=task_name)
+    # Pass seed so reset() also uses the fixed seed for its random.seed() call
+    obs = env.reset(task_name=task_name, seed=REPRODUCIBILITY_SEED)
 
-    history: List[str] = []
-    rewards: List[float] = []
+    history:    List[str]   = []
+    rewards:    List[float] = []
     steps_taken = 0
-    success = False
-    score = 0.0
+    success     = False
+    score       = 0.0
 
     log_start(task=task_name, env=BENCHMARK, model=MODEL_NAME)
 
@@ -159,11 +178,11 @@ def run_episode(task_name: str, difficulty: str) -> float:
                 break
 
             decision = ask_llm(client, obs, history)
-            action = TrialAction(decision=decision)
-            obs = env.step(action)
+            action   = TrialAction(decision=decision)
+            obs      = env.step(action)
 
             reward = float(obs.reward) if obs.reward is not None else 0.0
-            done = obs.done
+            done   = obs.done
 
             rewards.append(reward)
             steps_taken = step
@@ -202,14 +221,15 @@ def run_episode(task_name: str, difficulty: str) -> float:
 if __name__ == "__main__":
     print("=" * 60, flush=True)
     print("CLINICAL TRIAL ENV — Baseline Evaluation", flush=True)
-    print(f"Model: {MODEL_NAME}", flush=True)
+    print(f"Model:    {MODEL_NAME}", flush=True)
     print(f"Endpoint: {API_BASE_URL}", flush=True)
+    print(f"Seed:     {REPRODUCIBILITY_SEED} (fixed for reproducibility)", flush=True)
     print("=" * 60, flush=True)
 
     if not API_KEY:
         print(
-            "[ERROR] No API key found. Set HF_TOKEN, OPENAI_API_KEY, or API_KEY "
-            "environment variable.",
+            "[ERROR] No API key found. "
+            "Set HF_TOKEN, OPENAI_API_KEY, or API_KEY environment variable.",
             flush=True,
         )
         sys.exit(1)

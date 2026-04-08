@@ -1,3 +1,11 @@
+# API keys — never commit these
+keys.txt
+*.env
+.env
+
+# Test output
+output.txt
+
 # Python
 __pycache__/
 *.py[cod]
@@ -13,19 +21,14 @@ build/
 .venv/
 venv/
 env/
+.conda/
 
-# Misc temp files
-*.txt.bak
-output.txt
-env_src.txt
-models_src.txt
-
-# Secrets — NEVER commit keys
-.env
-*.env
-keys.txt
-
-# IDE
+# IDEs
 .vscode/
 .idea/
 *.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
