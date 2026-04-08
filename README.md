@@ -1,5 +1,14 @@
-# Clinical Trial Optimization — OpenEnv RL Environment
+---
+title: Clinical Trial Optimization AI
+emoji: 💊
+colorFrom: blue
+colorTo: green
+sdk: docker
+app_port: 7860
+pinned: false
+---
 
+# Clinical Trial Optimization — OpenEnv RL Environment
 [![OpenEnv](https://img.shields.io/badge/OpenEnv-compliant-blue)](https://github.com/meta-pytorch/OpenEnv)
 
 An RL environment where an AI agent acts as a clinical trial manager,
