@@ -16,3 +16,6 @@ dependencies = [
     "openai>=1.20.0",
     "python-dotenv>=1.0.0"
 ]
+
+[project.scripts]
+server = "server.app:main"
