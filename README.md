@@ -9,11 +9,15 @@ pinned: false
 ---
 
 # Clinical Trial Optimization — OpenEnv RL Environment
+
 [![OpenEnv](https://img.shields.io/badge/OpenEnv-compliant-blue)](https://github.com/meta-pytorch/OpenEnv)
+[![Python 3.11](https://img.shields.io/badge/Python-3.11-blue)](https://python.org)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 An RL environment where an AI agent acts as a clinical trial manager,
-making sequential decisions to find the optimal drug dose safely,
-efficiently, and within budget.
+making sequential decisions across **5 distinct pharmaceutical R&D tasks**
+— from dose escalation to multi-endpoint optimization. Designed to train
+and evaluate AI agents on real-world clinical decision-making.
 
 Built with [`openenv-core`](https://pypi.org/project/openenv-core/) — implements
 the full OpenEnv spec including `step()`, `reset()`, `state()`, and `openenv.yaml`.
@@ -22,65 +26,104 @@ the full OpenEnv spec including `step()`, `reset()`, `state()`, and `openenv.yam
 
 ## Real-World Problem
 
-Clinical trials cost \$1–3 billion and take 10–15 years on average.
-90% of drugs fail somewhere in this process — often due to suboptimal
-sequential decision-making about dosage, patient enrollment, and when
-to stop. This environment trains AI agents to make these decisions
-better, filling a genuine gap in RL research.
+Clinical trials cost **\$1–3 billion** and take **10–15 years** on average.
+**90% of drugs fail** somewhere in this process — often due to suboptimal
+sequential decision-making about dosage, patient enrollment, safety
+monitoring, and when to stop. This environment trains AI agents to make
+these decisions better, filling a genuine gap in RL research.
 
-## Environment Description
-
-The agent manages a simulated Phase 2 drug trial for a Type 2 Diabetes
-medication. Each episode, a drug with a **hidden** optimal dose is generated.
-The agent must discover this dose through experimentation while:
-
-- Staying within safety thresholds (side effects < 30%)
-- Finding an effective dose (effectiveness > 35%)
-- Managing a \$5M budget
-- Concluding the trial efficiently (within 52 weeks)
-
-The environment randomises the true optimal dose and safety margin each
-episode, making it a genuine learning problem — not a lookup table.
+Unlike simple dose-finding simulators, this environment models the
+**full complexity of Phase 2 trial management**: adaptive designs,
+interim analyses, multi-organ safety monitoring, multi-endpoint
+optimization, and Bayesian statistical reasoning.
 
 ---
 
-## Action Space
+## Architecture
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    AI Agent (LLM)                           │
+│  Observes: dose, effectiveness, safety, power, toxicity     │
+│  Actions:  10 clinical trial management decisions           │
+└────────────────────────┬────────────────────────────────────┘
+                         │ step(action)
+                         ▼
+┌─────────────────────────────────────────────────────────────┐
+│              Clinical Trial Environment                     │
+│  ┌──────────────┐  ┌──────────────┐  ┌───────────────────┐ │
+│  │ Dose-Response │  │ Safety Model │  │ Statistical Engine│ │
+│  │  (Bell curve) │  │  (Sigmoid)   │  │ (Power, CI, etc.) │ │
+│  └──────────────┘  └──────────────┘  └───────────────────┘ │
+│  ┌──────────────┐  ┌──────────────┐  ┌───────────────────┐ │
+│  │  Patient      │  │ Organ        │  │ Budget & Time     │ │
+│  │  Dynamics     │  │ Toxicity     │  │ Management        │ │
+│  └──────────────┘  └──────────────┘  └───────────────────┘ │
+└────────────────────────┬────────────────────────────────────┘
+                         │ grade()
+                         ▼
+┌─────────────────────────────────────────────────────────────┐
+│              Per-Task Grader (0.0 – 1.0)                    │
+│  6+ criteria per task: safety, effectiveness, exploration,  │
+│  dose accuracy, efficiency, budget, arm management, etc.    │
+└─────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## 5 Tasks
+
+| # | Task | Difficulty | Key Challenge | Max Steps |
+|---|------|------------|---------------|-----------|
+| 1 | `dose_escalation` | Easy | Classic 3+3 dose-finding with DLT monitoring | 20 |
+| 2 | `adaptive_enrollment` | Medium | Bayesian adaptive randomization across treatment arms | 25 |
+| 3 | `interim_analysis` | Medium | Futility/efficacy stopping decisions at interim looks | 30 |
+| 4 | `safety_monitoring` | Hard | DSMB-style multi-organ safety signal detection | 25 |
+| 5 | `multi_endpoint` | Hard | Primary + secondary endpoint trade-off optimization | 30 |
+
+Each task has a **unique grading rubric** with 6+ independently scored criteria
+that evaluate trajectory quality (exploration, safety responses, adaptive
+management), not just final outcomes.
+
+---
+
+## Action Space (10 Actions)
 
 | Action | Description | Cost |
 |--------|-------------|------|
-| `increase_dose` | Raise current dose by 20mg | \$150,000 |
-| `decrease_dose` | Lower current dose by 15mg | \$100,000 |
-| `keep_dose` | Maintain dose, collect more data | \$80,000 |
-| `enroll_more_patients` | Add 40 more patients at current dose | \$200,000 |
-| `stop_trial` | Conclude the trial and submit results | — |
+| `increase_dose` | Escalate dose by 20mg | \$150,000 |
+| `decrease_dose` | De-escalate dose by 15mg | \$100,000 |
+| `keep_dose` | Maintain dose, collect data | \$80,000 |
+| `enroll_more_patients` | Add 40 patients | \$200,000 |
+| `stop_trial` | Conclude trial and submit results | — |
+| `add_treatment_arm` | Add new dose arm (adaptive) | \$250,000 |
+| `drop_treatment_arm` | Drop worst-performing arm | — |
+| `request_interim_analysis` | Formal interim review | \$120,000 |
+| `pause_enrollment` | Pause/resume for safety review | \$50,000 |
+| `adjust_monitoring` | Enhance safety monitoring | \$60,000 |
 
 ## Observation Space
 
-| Field | Type | Range | Description |
-|-------|------|-------|-------------|
-| `week` | int | 1–52 | Current trial week |
-| `current_dose_mg` | int | 5–150 | Current dose being tested |
-| `patients_enrolled` | int | — | Total patients in trial |
-| `avg_effectiveness` | float | 0–1 | Blood sugar reduction rate |
-| `side_effect_rate` | float | 0–1 | Fraction with side effects |
-| `budget_remaining` | float | — | Remaining USD budget |
-| `done` | bool | — | Episode ended |
-| `reward` | float | -1–1 | Reward for last action |
-| `message` | str | — | Human-readable outcome |
-
----
-
-## Tasks
-
-| Task | Difficulty | Optimal Dose Range | Safety Margin | Max Steps |
-|------|------------|-------------------|---------------|-----------|
-| `dose_finding_easy` | Easy | 30–70mg | 20–35mg | 20 |
-| `dose_finding_medium` | Medium | 50–80mg | 13–18mg | 20 |
-| `dose_finding_hard` | Hard | 60–100mg | 8–12mg | 20 |
-
-Each task has a **programmatic grader** that returns a score from 0.0–1.0.
-Tasks progress from easy (wide safety window) to hard (very narrow margin requiring
-precise, conservative dose titration).
+| Field | Type | Description |
+|-------|------|-------------|
+| `week` | int | Current trial week (1–52) |
+| `current_dose_mg` | int | Current dose in mg |
+| `patients_enrolled` | int | Total patients |
+| `avg_effectiveness` | float | Primary endpoint improvement (0–1) |
+| `side_effect_rate` | float | Adverse event fraction (0–1) |
+| `budget_remaining` | float | Remaining budget in USD |
+| `confidence_interval_low` | float | Lower 95% CI for effectiveness |
+| `confidence_interval_high` | float | Upper 95% CI for effectiveness |
+| `statistical_power` | float | Current statistical power (0–1) |
+| `dropout_rate` | float | Patient attrition rate |
+| `active_treatment_arms` | int | Number of active arms |
+| `serious_adverse_events` | int | Cumulative SAE count |
+| `organ_toxicity` | dict | Per-organ toxicity (liver, kidney, cardiac) |
+| `interim_analysis_due` | bool | Interim analysis scheduled? |
+| `data_maturity` | float | Follow-up completion fraction |
+| `futility_probability` | float | Bayesian failure probability |
+| `done` | bool | Episode ended |
+| `reward` | float | Step reward (-1 to 1) |
 
 ---
 
@@ -90,24 +133,28 @@ Shaped rewards normalised to **[-1.0, +1.0]** per step:
 
 | Signal | Value | Condition |
 |--------|-------|-----------|
-| Found strong effectiveness | +0.25 | Effectiveness > 40% |
-| Moving toward effective dose | +0.10 | Effectiveness > 25% |
-| Good safety decision | +0.15 | Side effects < 15% and effectiveness > 30% |
-| Perfect trial stop | +0.50 | Stopped with effectiveness > 35% and side effects < 20% |
+| Strong effectiveness found | +0.25 | Effectiveness > 40% |
+| Moderate improvement | +0.10 | Effectiveness > 25% |
+| Successful trial stop | +0.50 | Effective + safe dose confirmed |
+| Safety response | +0.10 to +0.20 | Appropriate pause/decrease on signal |
+| Adaptive arm management | +0.05 to +0.10 | Smart arm additions/drops |
+| Interim analysis | +0.05 to +0.15 | Timely interim review |
 | Safety violation | -0.30 | Side effects > 30% |
-| Dangerous dose | -0.40 | Side effects > 50% emergency |
+| Emergency stop | -0.40 | Side effects > 50% |
 | Budget exhaustion | -0.20 | Budget runs out |
 
-## Grader Scoring (0.0 – 1.0)
+## Grading (0.0 – 1.0)
 
-| Criterion | Score | Condition |
-|-----------|-------|-----------|
-| Safety maintained | +0.25 | side_effect_rate ≤ 30% |
-| Strong effectiveness | +0.30 | effectiveness ≥ 40% |
-| Moderate effectiveness | +0.15 | effectiveness ≥ 25% |
-| Efficiency bonus | +0.20 | Found dose within ≤20 weeks |
-| Budget not exhausted | +0.10 | Budget remaining > 0 |
-| Budget efficiency | +0.15 | Used <50% of budget when effective |
+Each task has 6+ independent criteria. Example for `dose_escalation`:
+
+| Criterion | Weight | Condition |
+|-----------|--------|-----------|
+| Safety maintained | 0.20 | max side_effect_rate ≤ 30% |
+| Effectiveness | 0.25 | effectiveness ≥ 30% |
+| Dose exploration | 0.15 | ≥3 different doses tested |
+| Dose accuracy | 0.20 | within 10mg of optimal |
+| Efficiency | 0.10 | found dose within 15 weeks |
+| Budget managed | 0.10 | budget not exhausted |
 
 ---
 
@@ -119,6 +166,9 @@ pip install -r requirements.txt
 
 # Run locally
 uvicorn server.app:app --host 0.0.0.0 --port 7860
+
+# Verify environment
+python verify.py
 ```
 
 ## Docker
@@ -136,23 +186,9 @@ export HF_TOKEN=hf_your_key_here
 export API_BASE_URL=https://router.huggingface.co/v1
 export MODEL_NAME=Qwen/Qwen2.5-7B-Instruct
 
-# Run all 3 tasks
+# Run all 5 tasks
 python inference.py
 ```
-
-## Baseline Scores (llama-3.1-8b-instant via Groq)
-
-*Run with `HF_TOKEN=<groq_key>`, `API_BASE_URL=https://api.groq.com/openai/v1`, `MODEL_NAME=llama-3.1-8b-instant`*
-
-| Task | Score | Notes |
-|------|-------|-------|
-| dose_finding_easy | 0.650 | Safety maintained, effectiveness ≥40% |
-| dose_finding_medium | 0.350 | Safety maintained, dose not explored sufficiently |
-| dose_finding_hard | 0.332 | Safety maintained, dose not explored sufficiently |
-| **Average** | **0.444** | |
-
-> These are conservative baseline scores. A smarter agent that properly explores the dose space
-> should achieve 0.65+ on medium and 0.50+ on hard tasks.
 
 ---
 
@@ -161,31 +197,79 @@ python inference.py
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/reset` | POST | Start new episode (generic) |
-| `/reset/easy` | POST | Start easy difficulty episode |
-| `/reset/medium` | POST | Start medium difficulty episode |
-| `/reset/hard` | POST | Start hard difficulty episode |
+| `/reset/dose_escalation` | POST | Start dose escalation task |
+| `/reset/adaptive_enrollment` | POST | Start adaptive enrollment task |
+| `/reset/interim_analysis` | POST | Start interim analysis task |
+| `/reset/safety_monitoring` | POST | Start safety monitoring task |
+| `/reset/multi_endpoint` | POST | Start multi-endpoint task |
 | `/step` | POST | Take one action |
 | `/state` | GET | Current episode metadata |
 | `/ws` | WebSocket | Full WebSocket interface |
-| `/tasks` | GET | List all available tasks |
+| `/tasks` | GET | List all 5 tasks |
 | `/grade` | POST | Grade current episode (0.0–1.0) |
 | `/health` | GET | Health check |
 | `/schema` | GET | Action/Observation JSON schemas |
 
 ---
 
-## OpenEnv Compliance
+## Client Usage
 
-This environment fully implements the OpenEnv spec:
+```python
+from client import ClinicalTrialEnvClient, TrialAction
+
+with ClinicalTrialEnvClient("http://localhost:7860") as client:
+    # List tasks
+    tasks = client.tasks()
+
+    # Run dose escalation
+    obs = client.reset("dose_escalation")
+    obs = client.step(TrialAction(decision="increase_dose"))
+    obs = client.step(TrialAction(decision="increase_dose"))
+    obs = client.step(TrialAction(decision="stop_trial"))
+
+    # Grade the episode
+    result = client.grade()
+    print(f"Score: {result['score']}")
+```
+
+---
+
+## Project Structure
+
+```
+clinical_trial_env/
+├── .dockerignore           # Docker build exclusions
+├── __init__.py             # Module exports (empty)
+├── client.py               # HTTP client for programmatic access
+├── models.py               # TrialAction, TrialObservation, TrialState
+├── inference.py            # Baseline inference script (OpenEnv spec)
+├── openenv.yaml            # OpenEnv manifest (5 tasks, 10 actions)
+├── pyproject.toml          # Project metadata
+├── requirements.txt        # Python dependencies
+├── Dockerfile              # Container image definition
+├── README.md               # This file
+├── verify.py               # Automated verification tests
+└── server/
+    ├── __init__.py         # Server module
+    ├── app.py              # FastAPI + openenv create_fastapi_app
+    ├── environment.py      # Core simulation logic (5 task types)
+    └── grader.py           # Per-task deterministic graders (6+ criteria)
+```
+
+---
+
+## OpenEnv Compliance
 
 - ✅ `openenv-core` base classes (`Action`, `Observation`, `State`, `Environment`)
 - ✅ `step(action)` → returns observation, reward, done
 - ✅ `reset()` → returns initial observation
 - ✅ `state` property → returns episode metadata
 - ✅ `openenv.yaml` with `spec_version: 1`, `tags: [openenv]`
-- ✅ 3 tasks (easy → medium → hard) with agent graders (0.0–1.0)
-- ✅ Meaningful shaped reward function
+- ✅ 5 tasks with distinct grading rubrics (6+ criteria each)
+- ✅ Meaningful trajectory-aware reward shaping
 - ✅ `create_fastapi_app()` from openenv-core
 - ✅ WebSocket endpoint (`/ws`)
-- ✅ Working `Dockerfile`
+- ✅ Working `Dockerfile` (2 vCPU / 8GB RAM compliant)
 - ✅ Baseline `inference.py` with `[START]`/`[STEP]`/`[END]` log format
+- ✅ `client.py` for programmatic access
+- ✅ `.dockerignore` for lean builds

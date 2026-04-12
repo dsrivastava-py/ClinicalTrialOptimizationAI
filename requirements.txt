@@ -12,5 +12,8 @@ pydantic>=2.6.0
 # OpenAI-compatible client for inference script
 openai>=1.20.0
 
+# HTTP client for client.py
+requests>=2.31.0
+
 # Utility
 python-dotenv>=1.0.0

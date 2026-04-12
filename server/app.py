@@ -13,103 +13,96 @@ from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 from openenv.core.env_server import create_fastapi_app
 from models import TrialAction, TrialObservation
-from server.environment import ClinicalTrialEnvironment
+from server.environment import ClinicalTrialEnvironment, TASK_CONFIG
 from server.grader import grade_by_task
 
 # ── OPENENV-COMPLIANT APP ────────────────────────────────────────────────────
 # create_fastapi_app sets up /reset, /step, /state, /health, /schema, /ws
-# It accepts a callable factory so each HTTP request gets a fresh env instance
 app: FastAPI = create_fastapi_app(ClinicalTrialEnvironment, TrialAction, TrialObservation)
 
-# ── SINGLETON ENV for stateful grade/task endpoints ──────────────────────────
-# The OpenEnv HTTP endpoints each spin up a new env per call (stateless).
-# We maintain a shared env for /grade and task-specific /reset/<task> routes.
+# ── SHARED ENV for stateful grade/task endpoints ─────────────────────────────
 _shared_env = ClinicalTrialEnvironment()
 
 
 # ── TASK-SPECIFIC RESET ENDPOINTS ────────────────────────────────────────────
 
-@app.post("/reset/easy")
-def reset_easy():
-    """Start a new EASY episode (30-70mg optimal dose, wide safety window)."""
-    _shared_env.difficulty = "easy"
-    obs = _shared_env.reset(task_name="dose_finding_easy")
+def _reset_task(task_name: str):
+    """Helper: reset shared env for a specific task."""
+    config = TASK_CONFIG.get(task_name, {})
+    _shared_env.difficulty = config.get("difficulty", "easy")
+    obs = _shared_env.reset(task_name=task_name)
     return JSONResponse(content={
         "observation": obs.model_dump(),
         "reward": obs.reward,
         "done": obs.done,
     })
+
+
+@app.post("/reset/dose_escalation")
+def reset_dose_escalation():
+    """Start a DOSE ESCALATION episode (easy — find optimal dose via 3+3 design)."""
+    return _reset_task("dose_escalation")
+
+
+@app.post("/reset/adaptive_enrollment")
+def reset_adaptive_enrollment():
+    """Start an ADAPTIVE ENROLLMENT episode (medium — manage treatment arms)."""
+    return _reset_task("adaptive_enrollment")
+
+
+@app.post("/reset/interim_analysis")
+def reset_interim_analysis():
+    """Start an INTERIM ANALYSIS episode (medium — continue/stop decisions)."""
+    return _reset_task("interim_analysis")
+
+
+@app.post("/reset/safety_monitoring")
+def reset_safety_monitoring():
+    """Start a SAFETY MONITORING episode (hard — detect organ toxicity signals)."""
+    return _reset_task("safety_monitoring")
+
+
+@app.post("/reset/multi_endpoint")
+def reset_multi_endpoint():
+    """Start a MULTI-ENDPOINT episode (hard — optimize primary + secondary endpoints)."""
+    return _reset_task("multi_endpoint")
+
+
+# Keep legacy /reset/<difficulty> endpoints for backward compatibility
+@app.post("/reset/easy")
+def reset_easy():
+    """Alias: Start dose_escalation (easy)."""
+    return _reset_task("dose_escalation")
 
 
 @app.post("/reset/medium")
 def reset_medium():
-    """Start a new MEDIUM episode (50-80mg optimal dose, narrower safety margin)."""
-    _shared_env.difficulty = "medium"
-    obs = _shared_env.reset(task_name="dose_finding_medium")
-    return JSONResponse(content={
-        "observation": obs.model_dump(),
-        "reward": obs.reward,
-        "done": obs.done,
-    })
+    """Alias: Start interim_analysis (medium)."""
+    return _reset_task("interim_analysis")
 
 
 @app.post("/reset/hard")
 def reset_hard():
-    """Start a new HARD episode (60-100mg optimal dose, very narrow safety window)."""
-    _shared_env.difficulty = "hard"
-    obs = _shared_env.reset(task_name="dose_finding_hard")
-    return JSONResponse(content={
-        "observation": obs.model_dump(),
-        "reward": obs.reward,
-        "done": obs.done,
-    })
+    """Alias: Start safety_monitoring (hard)."""
+    return _reset_task("safety_monitoring")
 
 
 # ── TASKS LISTING ────────────────────────────────────────────────────────────
 
 @app.get("/tasks")
 def list_tasks():
-    """List all available tasks with their descriptions and difficulty."""
-    return JSONResponse(content={
-        "tasks": [
-            {
-                "name": "dose_finding_easy",
-                "difficulty": "easy",
-                "description": (
-                    "Find optimal dose (30-70mg range) with wide safety window. "
-                    "Side effect threshold is generous. Success requires "
-                    "effectiveness > 35% without exceeding 30% side effect rate."
-                ),
-                "max_steps": 20,
-                "success_threshold": 0.5,
-                "reset_endpoint": "/reset/easy",
-            },
-            {
-                "name": "dose_finding_medium",
-                "difficulty": "medium",
-                "description": (
-                    "Find optimal dose (50-80mg range) with narrower safety margin. "
-                    "Requires more precise titration and careful balance of "
-                    "effectiveness vs. safety."
-                ),
-                "max_steps": 20,
-                "success_threshold": 0.5,
-                "reset_endpoint": "/reset/medium",
-            },
-            {
-                "name": "dose_finding_hard",
-                "difficulty": "hard",
-                "description": (
-                    "Find optimal dose (60-100mg range) with very narrow safety window "
-                    "(only 8-12mg above optimal before side effects spike). "
-                    "Requires precise, conservative exploration."
-                ),
-                "max_steps": 20,
-                "success_threshold": 0.5,
-                "reset_endpoint": "/reset/hard",
-            },
-        ]
-    })
+    """List all 5 available tasks with descriptions, difficulties, and endpoints."""
+    tasks = []
+    for name, config in TASK_CONFIG.items():
+        tasks.append({
+            "name": name,
+            "difficulty": config["difficulty"],
+            "description": config["description"],
+            "max_steps": config["max_steps"],
+            "success_threshold": 0.5,
+            "reset_endpoint": f"/reset/{name}",
+        })
+    return JSONResponse(content={"tasks": tasks})
 
 
 # ── GRADING ENDPOINT ─────────────────────────────────────────────────────────
@@ -133,23 +126,32 @@ def grade():
 
 @app.get("/")
 def root():
-    """Root endpoint — returns environment info and available endpoints."""
+    """Root endpoint — environment info and available endpoints."""
     return JSONResponse(content={
         "name": "clinical_trial_env",
-        "version": "0.1.0",
-        "description": "Clinical drug trial optimization RL environment (OpenEnv compliant)",
+        "version": "0.2.0",
+        "description": (
+            "Clinical trial optimization RL environment with 5 distinct tasks "
+            "(dose escalation, adaptive enrollment, interim analysis, "
+            "safety monitoring, multi-endpoint optimization). OpenEnv compliant."
+        ),
         "framework": "openenv-core",
+        "tasks": list(TASK_CONFIG.keys()),
         "endpoints": [
             "/reset", "/step", "/state", "/health",
             "/schema", "/ws",
-            "/reset/easy", "/reset/medium", "/reset/hard",
+            "/reset/dose_escalation", "/reset/adaptive_enrollment",
+            "/reset/interim_analysis", "/reset/safety_monitoring",
+            "/reset/multi_endpoint",
             "/tasks", "/grade",
         ],
     })
 
+
 def main():
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="0.0.0.0", port=7860)
+
 
 if __name__ == "__main__":
     main()

@@ -1,11 +1,12 @@
 name: clinical_trial_env
-version: "0.1.0"
+version: "0.2.0"
 spec_version: 1
 description: >
   A reinforcement learning environment simulating clinical drug trial
-  optimization. An AI agent acts as a trial manager, making sequential
-  decisions about dosage, patient enrollment, and trial termination to
-  find the optimal drug dose safely, efficiently, and within budget.
+  optimization with 5 distinct task types. An AI agent acts as a trial
+  manager, making sequential decisions about dosage escalation, patient
+  enrollment, interim analysis, safety monitoring, and multi-endpoint
+  optimization — modeling real pharmaceutical R&D decision-making.
 author: "Devansh Srivastava"
 license: "MIT"
 tags:
@@ -13,41 +14,65 @@ tags:
   - healthcare
   - rl
   - drug-discovery
+  - clinical-trials
+  - safety
 
 port: 7860
 
 tasks:
-  - name: dose_finding_easy
+  - name: dose_escalation
     description: >
-      Find the optimal dose for a drug with a wide safety window.
-      Target dose is in the 30–70mg range. Side effect threshold is
-      generous. Agent must find an effective dose (>35% effectiveness)
-      without exceeding 30% side effect rate.
+      Find the optimal dose via classic 3+3 escalation design. The agent
+      must increase dose systematically from 10mg, monitor for dose-limiting
+      toxicities, and identify the maximum tolerated dose. Optimal dose
+      is in the 30-70mg range with a generous safety margin (20-35mg).
     difficulty: easy
     max_steps: 20
     success_threshold: 0.5
 
-  - name: dose_finding_medium
+  - name: adaptive_enrollment
     description: >
-      Find the optimal dose with a higher target range (50–80mg) and
-      narrower safety window. Requires more precise titration. Agent
-      must balance effectiveness vs safety more carefully.
+      Manage patient enrollment across multiple treatment arms using
+      Bayesian adaptive randomization. The agent must add promising arms,
+      drop underperforming ones, and allocate patients efficiently. Optimal
+      dose range 40-80mg with 15-25mg safety margin.
     difficulty: medium
-    max_steps: 20
+    max_steps: 25
     success_threshold: 0.5
 
-  - name: dose_finding_hard
+  - name: interim_analysis
     description: >
-      Find the optimal dose with a very high target range (60–100mg)
-      and a very narrow safety margin (only 8-12mg above optimal before
-      side effects spike). Requires precise, conservative exploration.
+      Make continue/stop decisions at pre-planned interim analysis points.
+      The agent must conduct interim reviews to assess futility and efficacy,
+      and decide whether to continue enrollment, modify the trial, or stop
+      early. Requires understanding of statistical power and futility.
+    difficulty: medium
+    max_steps: 30
+    success_threshold: 0.5
+
+  - name: safety_monitoring
+    description: >
+      Detect and respond to emerging multi-organ safety signals (liver,
+      kidney, cardiac toxicity). A hidden organ has elevated toxicity risk.
+      The agent must proactively monitor, pause enrollment when signals
+      appear, and maintain patient safety while still gathering efficacy data.
     difficulty: hard
-    max_steps: 20
+    max_steps: 25
+    success_threshold: 0.5
+
+  - name: multi_endpoint
+    description: >
+      Optimize for primary AND secondary endpoints simultaneously. The
+      secondary endpoint peaks at a LOWER dose than the primary, creating
+      a genuine multi-objective trade-off. The agent must find the dose
+      that adequately addresses both endpoints.
+    difficulty: hard
+    max_steps: 30
     success_threshold: 0.5
 
 action_space:
   type: discrete
-  description: "Five possible actions the agent can take each week"
+  description: "Ten possible actions the agent can take each week"
   actions:
     - name: increase_dose
       description: "Increase current dose by 20mg (costs $150,000)"
@@ -59,86 +84,171 @@ action_space:
       description: "Enroll 40 additional patients at current dose (costs $200,000)"
     - name: stop_trial
       description: "Conclude the trial and submit results"
+    - name: add_treatment_arm
+      description: "Add a new dose arm for adaptive testing (costs $250,000)"
+    - name: drop_treatment_arm
+      description: "Drop the worst-performing treatment arm"
+    - name: request_interim_analysis
+      description: "Trigger a formal interim analysis review (costs $120,000)"
+    - name: pause_enrollment
+      description: "Pause/resume enrollment for safety review (costs $50,000)"
+    - name: adjust_monitoring
+      description: "Enhance safety monitoring protocols (costs $60,000)"
 
 observation_space:
+  # Core
   week:
     type: int
     range: [1, 52]
-    description: "Current trial week (1-52)"
+    description: "Current trial week"
   current_dose_mg:
     type: int
     range: [5, 150]
-    description: "Current dose being tested in milligrams"
+    description: "Current dose in milligrams"
   patients_enrolled:
     type: int
-    description: "Total number of patients enrolled so far"
+    description: "Total patients enrolled"
   avg_effectiveness:
     type: float
     range: [0.0, 1.0]
-    description: "Average blood sugar reduction rate observed"
+    description: "Average primary endpoint improvement"
   side_effect_rate:
     type: float
     range: [0.0, 1.0]
-    description: "Fraction of patients experiencing side effects"
+    description: "Fraction of patients with adverse events"
   budget_remaining:
     type: float
-    description: "Remaining trial budget in USD"
+    description: "Remaining budget in USD"
+  # Statistical
+  confidence_interval_low:
+    type: float
+    range: [0.0, 1.0]
+    description: "Lower 95% CI for effectiveness"
+  confidence_interval_high:
+    type: float
+    range: [0.0, 1.0]
+    description: "Upper 95% CI for effectiveness"
+  statistical_power:
+    type: float
+    range: [0.0, 1.0]
+    description: "Current statistical power"
+  # Patient dynamics
+  dropout_rate:
+    type: float
+    range: [0.0, 1.0]
+    description: "Patient attrition rate"
+  active_treatment_arms:
+    type: int
+    description: "Number of active treatment arms"
+  serious_adverse_events:
+    type: int
+    description: "Cumulative SAE count"
+  # Safety
+  organ_toxicity:
+    type: dict
+    description: "Per-organ toxicity levels (liver, kidney, cardiac)"
+  # Regulatory
+  interim_analysis_due:
+    type: bool
+    description: "Whether an interim analysis is scheduled"
+  data_maturity:
+    type: float
+    range: [0.0, 1.0]
+    description: "Fraction of planned follow-up completed"
+  futility_probability:
+    type: float
+    range: [0.0, 1.0]
+    description: "Bayesian predictive probability of trial failure"
+  # Base
   done:
     type: bool
     description: "Whether the episode has ended"
   reward:
     type: float
     range: [-1.0, 1.0]
-    description: "Reward signal for the last action taken"
+    description: "Reward signal for the last action"
   message:
     type: str
     description: "Human-readable description of what happened"
-  metadata:
-    type: dict
-    description: "Additional metadata (OpenEnv base field)"
 
 reward_function:
   description: >
     Shaped reward signal normalised to [-1.0, +1.0] per step.
-    Rewards progress toward finding an effective, safe dose.
-    Penalises dangerous actions and waste.
+    Combines information gain, safety costs, efficiency, and
+    terminal outcome rewards.
   signals:
-    - name: effective_dose_increase
+    - name: effective_dose_found
       range: [0.10, 0.25]
-      condition: "Dose increase that raises effectiveness above threshold"
+      condition: "Dose increase that raises effectiveness significantly"
     - name: safety_violation
       range: [-0.30, -0.40]
       condition: "Side effects exceeded 30% threshold"
     - name: successful_stop
       value: 0.50
       condition: "Trial stopped with effectiveness >35% and side effects <20%"
+    - name: safety_response
+      range: [0.10, 0.20]
+      condition: "Appropriate response to safety signal (pause/decrease)"
+    - name: adaptive_management
+      range: [0.05, 0.10]
+      condition: "Adding/dropping treatment arms based on data"
+    - name: interim_analysis
+      range: [0.05, 0.15]
+      condition: "Conducting interim analysis at appropriate time"
     - name: budget_exhaustion
       value: -0.20
       condition: "Budget runs out before trial conclusion"
     - name: emergency_stop
       value: -0.40
-      condition: "Side effect rate exceeds 50% threshold"
+      condition: "Side effect rate exceeds 50%"
 
 grader:
   description: >
-    Episode-level score from 0.0 to 1.0 computed at end of episode.
-    Partial progress signals provided throughout trajectory via step rewards.
-  criteria:
-    - name: safety_maintained
-      weight: 0.25
-      condition: "side_effect_rate <= 0.30 throughout"
-    - name: strong_effectiveness
-      weight: 0.30
-      condition: "effectiveness >= 0.40"
-    - name: moderate_effectiveness
-      weight: 0.15
-      condition: "effectiveness >= 0.25"
-    - name: efficiency_bonus
-      weight: 0.20
-      condition: "found effective dose within 20 weeks"
-    - name: budget_managed
-      weight: 0.10
-      condition: "budget not fully exhausted"
-    - name: budget_efficiency_bonus
-      weight: 0.15
-      condition: "used <50% of budget while achieving effectiveness"
+    Per-task episode-level score from 0.0 to 1.0. Each task has its own
+    deterministic rubric with 6+ independently scored criteria that
+    evaluate trajectory quality, not just final state.
+  tasks:
+    - name: dose_escalation
+      criteria:
+        - {name: safety_maintained, weight: 0.20, condition: "max side_effect_rate ≤ 0.30"}
+        - {name: effectiveness, weight: 0.25, condition: "effectiveness ≥ 0.30"}
+        - {name: dose_exploration, weight: 0.15, condition: "≥3 different doses tested"}
+        - {name: dose_accuracy, weight: 0.20, condition: "within 10mg of optimal"}
+        - {name: efficiency, weight: 0.10, condition: "found dose within 15 weeks"}
+        - {name: budget_managed, weight: 0.10, condition: "budget not exhausted"}
+
+    - name: adaptive_enrollment
+      criteria:
+        - {name: safety, weight: 0.15, condition: "max side_effect_rate ≤ 0.30"}
+        - {name: effectiveness, weight: 0.20, condition: "effectiveness ≥ 0.30"}
+        - {name: arm_management, weight: 0.20, condition: "≥3 arm additions/drops"}
+        - {name: exploration, weight: 0.15, condition: "≥3 doses explored"}
+        - {name: patient_efficiency, weight: 0.15, condition: "<150 patients enrolled"}
+        - {name: budget, weight: 0.10, condition: "budget not exhausted"}
+
+    - name: interim_analysis
+      criteria:
+        - {name: safety, weight: 0.15, condition: "max side_effect_rate ≤ 0.30"}
+        - {name: interim_usage, weight: 0.25, condition: "≥2 interim analyses conducted"}
+        - {name: effectiveness, weight: 0.20, condition: "effectiveness ≥ 0.30"}
+        - {name: statistical_power, weight: 0.15, condition: "power ≥ 0.80"}
+        - {name: trial_duration, weight: 0.15, condition: "10-30 weeks"}
+        - {name: budget, weight: 0.10, condition: "budget not exhausted"}
+
+    - name: safety_monitoring
+      criteria:
+        - {name: safety_response, weight: 0.25, condition: "paused/stopped when signals emerged"}
+        - {name: monitoring, weight: 0.20, condition: "≥3 safety responses"}
+        - {name: sae_limit, weight: 0.15, condition: "≤1 SAE"}
+        - {name: safety, weight: 0.15, condition: "max side_effect_rate ≤ 0.30"}
+        - {name: effectiveness, weight: 0.15, condition: "effectiveness ≥ 0.25"}
+        - {name: budget, weight: 0.10, condition: "budget not exhausted"}
+
+    - name: multi_endpoint
+      criteria:
+        - {name: primary_endpoint, weight: 0.20, condition: "primary effectiveness ≥ 0.30"}
+        - {name: secondary_endpoint, weight: 0.20, condition: "secondary effectiveness ≥ 0.25"}
+        - {name: safety, weight: 0.15, condition: "max side_effect_rate ≤ 0.30"}
+        - {name: exploration, weight: 0.15, condition: "≥3 doses explored"}
+        - {name: trade_off, weight: 0.15, condition: "both endpoints above threshold"}
+        - {name: budget, weight: 0.10, condition: "budget not exhausted"}

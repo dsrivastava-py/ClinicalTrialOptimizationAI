@@ -1,0 +1,30 @@
+# Docker build exclusions — keep image small
+.git
+.gitignore
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+*.egg-info
+dist/
+build/
+.eggs/
+.venv/
+venv/
+env/
+.conda/
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Project files not needed in container
+output.txt
+keys.txt
+walkthrough.md
+verify.py
+*.md
+!README.md
+uv.lock
