@@ -254,7 +254,7 @@ def run_episode(task_name: str, max_steps: int) -> float:
 
     except Exception as e:
         last_error = str(e)
-        score = 0.0
+        score = 0.01  # OpenEnv requires strictly (0, 1) exclusive
         reasons = [f"ERROR: {last_error}"]
 
     finally:

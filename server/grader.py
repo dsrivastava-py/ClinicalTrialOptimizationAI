@@ -3,7 +3,7 @@ Clinical Trial Optimization — Per-Task Grader
 Each task has its own deterministic rubric with 6+ independently scored criteria.
 Graders evaluate trajectory quality, not just final state.
 
-Score range: [0.0, 1.0] per task.
+Score range: (0.0, 1.0) per task — strictly between 0 and 1 exclusive.
 """
 from __future__ import annotations
 
@@ -11,6 +11,13 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from server.environment import ClinicalTrialEnvironment
+
+
+# ── Score clamping (OpenEnv requires strictly (0, 1) exclusive) ──────────────
+
+def _clamp_score(score: float) -> float:
+    """Clamp score to the open interval (0, 1) — never exactly 0.0 or 1.0."""
+    return max(0.01, min(0.99, score))
 
 
 # ── Generic utility checks ───────────────────────────────────────────────────
@@ -101,7 +108,7 @@ def _grade_dose_escalation(env: "ClinicalTrialEnvironment") -> tuple[float, list
     s, r = _budget_score(env)
     score += s; reasons.append(r)
 
-    return round(min(1.0, score), 3), reasons
+    return _clamp_score(round(min(1.0, score), 3)), reasons
 
 
 def _grade_adaptive_enrollment(env: "ClinicalTrialEnvironment") -> tuple[float, list[str]]:
@@ -149,7 +156,7 @@ def _grade_adaptive_enrollment(env: "ClinicalTrialEnvironment") -> tuple[float, 
     s, r = _budget_score(env)
     score += s; reasons.append(r)
 
-    return round(min(1.0, score), 3), reasons
+    return _clamp_score(round(min(1.0, score), 3)), reasons
 
 
 def _grade_interim_analysis(env: "ClinicalTrialEnvironment") -> tuple[float, list[str]]:
@@ -203,7 +210,7 @@ def _grade_interim_analysis(env: "ClinicalTrialEnvironment") -> tuple[float, lis
     s, r = _budget_score(env)
     score += s; reasons.append(r)
 
-    return round(min(1.0, score), 3), reasons
+    return _clamp_score(round(min(1.0, score), 3)), reasons
 
 
 def _grade_safety_monitoring(env: "ClinicalTrialEnvironment") -> tuple[float, list[str]]:
@@ -261,7 +268,7 @@ def _grade_safety_monitoring(env: "ClinicalTrialEnvironment") -> tuple[float, li
     s, r = _budget_score(env)
     score += s; reasons.append(r)
 
-    return round(min(1.0, score), 3), reasons
+    return _clamp_score(round(min(1.0, score), 3)), reasons
 
 
 def _grade_multi_endpoint(env: "ClinicalTrialEnvironment") -> tuple[float, list[str]]:
@@ -309,7 +316,7 @@ def _grade_multi_endpoint(env: "ClinicalTrialEnvironment") -> tuple[float, list[
     s, r = _budget_score(env)
     score += s; reasons.append(r)
 
-    return round(min(1.0, score), 3), reasons
+    return _clamp_score(round(min(1.0, score), 3)), reasons
 
 
 # ── Public API ────────────────────────────────────────────────────────────────
@@ -341,6 +348,7 @@ def grade_by_task(environment: "ClinicalTrialEnvironment", task_name: str) -> tu
     """
     Task-aware wrapper. Each task uses its own rubric.
     No difficulty multipliers — difficulty is built into each rubric.
+    Final score is clamped to (0, 1) exclusive per OpenEnv spec.
     """
     score, reasons = grade_episode(environment, task_name)
     config = {}
@@ -350,5 +358,6 @@ def grade_by_task(environment: "ClinicalTrialEnvironment", task_name: str) -> tu
     except ImportError:
         pass
     difficulty = config.get("difficulty", "easy")
+    score = _clamp_score(round(score, 3))
     reasons.append(f"[{task_name}] difficulty={difficulty} final_score={score:.3f}")
-    return round(score, 3), reasons
+    return score, reasons
